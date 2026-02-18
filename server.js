@@ -44,6 +44,67 @@ app.get('/', (req, res) => {
   res.json({ message: 'Champs Frechet Kebab API' });
 });
 
+// Route d'enregistrement
+app.post('/api/register', (req, res) => {
+  const { nom, prenom, email, telephone, adresse, dateNaissance, password } = req.body;
+  
+  db.run(
+    `INSERT INTO users (nom, prenom, email, telephone, adresse, dateNaissance, password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [nom, prenom, email, telephone, adresse, dateNaissance, password],
+    function(err) {
+      if (err) {
+        if (err.message.includes('UNIQUE')) {
+          return res.status(400).json({ error: 'Cet email est déjà utilisé' });
+        }
+        return res.status(500).json({ error: err.message });
+      }
+      res.status(201).json({ 
+        id: this.lastID,
+        message: 'Compte créé avec succès'
+      });
+    }
+  );
+});
+
+// Route de connexion
+app.post('/api/login', (req, res) => {
+  const { email, password } = req.body;
+  
+  db.get(
+    'SELECT * FROM users WHERE email = ? AND password = ?',
+    [email, password],
+    (err, user) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      if (!user) {
+        return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
+      }
+      res.json({ 
+        id: user.id,
+        nom: user.nom,
+        prenom: user.prenom,
+        email: user.email,
+        telephone: user.telephone,
+        adresse: user.adresse
+      });
+    }
+  );
+});
+
+// Route pour récupérer un utilisateur
+app.get('/api/users/:id', (req, res) => {
+  db.get('SELECT * FROM users WHERE id = ?', [req.params.id], (err, user) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (!user) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+    res.json(user);
+  });
+});
+
 app.get('/api/orders', (req, res) => {
   db.all('SELECT * FROM orders ORDER BY createdAt DESC', (err, orders) => {
     if (err) {
