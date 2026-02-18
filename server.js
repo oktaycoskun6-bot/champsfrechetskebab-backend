@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,12 +11,18 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
+// Supprimer l'ancienne base de données si RESET_DB est défini
+if (process.env.RESET_DB === 'true' && fs.existsSync('./champsfrechets.db')) {
+  console.log('🗑️  Suppression de l\'ancienne base de données...');
+  fs.unlinkSync('./champsfrechets.db');
+  console.log('✅ Base de données supprimée');
+}
+
 // Base de données SQLite
 const db = new sqlite3.Database('./champsfrechets.db');
 
 // Initialiser les tables
 db.serialize(() => {
-  // Créer la table users si elle n'existe pas
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nom TEXT NOT NULL,
@@ -23,30 +30,13 @@ db.serialize(() => {
     email TEXT UNIQUE NOT NULL,
     telephone TEXT NOT NULL,
     adresse TEXT NOT NULL,
-    npa TEXT,
-    ville TEXT,
-    pays TEXT,
+    npa TEXT NOT NULL,
+    ville TEXT NOT NULL,
+    pays TEXT NOT NULL,
     dateNaissance TEXT NOT NULL,
     password TEXT NOT NULL,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
-  
-  // Ajouter les colonnes manquantes si elles n'existent pas
-  db.all("PRAGMA table_info(users)", (err, columns) => {
-    if (!err) {
-      const columnNames = columns.map(col => col.name);
-      
-      if (!columnNames.includes('npa')) {
-        db.run("ALTER TABLE users ADD COLUMN npa TEXT DEFAULT ''");
-      }
-      if (!columnNames.includes('ville')) {
-        db.run("ALTER TABLE users ADD COLUMN ville TEXT DEFAULT ''");
-      }
-      if (!columnNames.includes('pays')) {
-        db.run("ALTER TABLE users ADD COLUMN pays TEXT DEFAULT 'Suisse'");
-      }
-    }
-  });
 
   db.run(`CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +48,8 @@ db.serialize(() => {
     status TEXT DEFAULT 'received',
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  
+  console.log('✅ Tables créées avec succès');
 });
 
 // Routes
