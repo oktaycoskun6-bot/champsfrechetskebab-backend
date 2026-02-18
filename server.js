@@ -22,6 +22,9 @@ db.serialize(() => {
     email TEXT UNIQUE NOT NULL,
     telephone TEXT NOT NULL,
     adresse TEXT NOT NULL,
+    npa TEXT NOT NULL,
+    ville TEXT NOT NULL,
+    pays TEXT NOT NULL,
     dateNaissance TEXT NOT NULL,
     password TEXT NOT NULL,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -46,11 +49,11 @@ app.get('/', (req, res) => {
 
 // Route d'enregistrement
 app.post('/api/register', (req, res) => {
-  const { nom, prenom, email, telephone, adresse, dateNaissance, password } = req.body;
+  const { nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password } = req.body;
   
   db.run(
-    `INSERT INTO users (nom, prenom, email, telephone, adresse, dateNaissance, password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [nom, prenom, email, telephone, adresse, dateNaissance, password],
+    `INSERT INTO users (nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password],
     function(err) {
       if (err) {
         if (err.message.includes('UNIQUE')) {
