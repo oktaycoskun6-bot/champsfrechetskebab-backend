@@ -15,6 +15,7 @@ const db = new sqlite3.Database('./champsfrechets.db');
 
 // Initialiser les tables
 db.serialize(() => {
+  // Créer la table users si elle n'existe pas
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nom TEXT NOT NULL,
@@ -22,13 +23,30 @@ db.serialize(() => {
     email TEXT UNIQUE NOT NULL,
     telephone TEXT NOT NULL,
     adresse TEXT NOT NULL,
-    npa TEXT NOT NULL,
-    ville TEXT NOT NULL,
-    pays TEXT NOT NULL,
+    npa TEXT,
+    ville TEXT,
+    pays TEXT,
     dateNaissance TEXT NOT NULL,
     password TEXT NOT NULL,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  
+  // Ajouter les colonnes manquantes si elles n'existent pas
+  db.all("PRAGMA table_info(users)", (err, columns) => {
+    if (!err) {
+      const columnNames = columns.map(col => col.name);
+      
+      if (!columnNames.includes('npa')) {
+        db.run("ALTER TABLE users ADD COLUMN npa TEXT DEFAULT ''");
+      }
+      if (!columnNames.includes('ville')) {
+        db.run("ALTER TABLE users ADD COLUMN ville TEXT DEFAULT ''");
+      }
+      if (!columnNames.includes('pays')) {
+        db.run("ALTER TABLE users ADD COLUMN pays TEXT DEFAULT 'Suisse'");
+      }
+    }
+  });
 
   db.run(`CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
