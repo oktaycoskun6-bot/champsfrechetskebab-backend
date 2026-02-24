@@ -11,6 +11,13 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // Configuration PostgreSQL depuis les variables d'environnement Railway
+console.log('🔍 DATABASE_URL:', process.env.DATABASE_URL ? 'Définie' : 'NON DÉFINIE');
+
+if (!process.env.DATABASE_URL) {
+  console.error('❌ ERREUR: DATABASE_URL n\'est pas définie!');
+  console.log('Variables disponibles:', Object.keys(process.env).filter(k => k.includes('DATA')));
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
