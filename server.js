@@ -1,7 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { Pool } = require('pg');
+const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,167 +12,162 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Configuration PostgreSQL depuis les variables d'environnement Railway
-console.log('🔍 DATABASE_URL:', process.env.DATABASE_URL ? 'Définie' : 'NON DÉFINIE');
-
-if (!process.env.DATABASE_URL) {
-  console.error('❌ ERREUR: DATABASE_URL n\'est pas définie!');
-  console.log('Variables disponibles:', Object.keys(process.env).filter(k => k.includes('DATA')));
+// Créer le dossier data s'il n'existe pas
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+// Base de données SQLite
+const dbPath = path.join(dataDir, 'champsfrechets.db');
+console.log('📁 Chemin base de données:', dbPath);
+
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('❌ Erreur ouverture DB:', err);
+  } else {
+    console.log('✅ Base de données SQLite connectée');
+  }
 });
 
 // Initialiser les tables
-async function initDatabase() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        nom VARCHAR(255) NOT NULL,
-        prenom VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        telephone VARCHAR(50) NOT NULL,
-        adresse TEXT NOT NULL,
-        npa VARCHAR(10) NOT NULL,
-        ville VARCHAR(255) NOT NULL,
-        pays VARCHAR(100) NOT NULL,
-        dateNaissance VARCHAR(50) NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom TEXT NOT NULL,
+    prenom TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    telephone TEXT NOT NULL,
+    adresse TEXT NOT NULL,
+    npa TEXT NOT NULL,
+    ville TEXT NOT NULL,
+    pays TEXT NOT NULL,
+    dateNaissance TEXT NOT NULL,
+    password TEXT NOT NULL,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (err) console.error('❌ Erreur table users:', err);
+    else console.log('✅ Table users créée');
+  });
 
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS orders (
-        id SERIAL PRIMARY KEY,
-        userId INTEGER NOT NULL,
-        items TEXT NOT NULL,
-        total DECIMAL(10, 2) NOT NULL,
-        pickupDate VARCHAR(50) NOT NULL,
-        pickupTime VARCHAR(50) NOT NULL,
-        status VARCHAR(50) DEFAULT 'received',
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    console.log('✅ Tables PostgreSQL créées avec succès');
-  } catch (error) {
-    console.error('❌ Erreur création tables:', error);
-  }
-}
-
-initDatabase();
+  db.run(`CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    items TEXT NOT NULL,
+    total REAL NOT NULL,
+    pickupDate TEXT NOT NULL,
+    pickupTime TEXT NOT NULL,
+    status TEXT DEFAULT 'received',
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (err) console.error('❌ Erreur table orders:', err);
+    else console.log('✅ Table orders créée');
+  });
+});
 
 // Routes
 app.get('/', (req, res) => {
-  res.json({ message: 'Champs Frechet Kebab API' });
+  res.json({ message: 'Champs Frechet Kebab API', database: 'SQLite' });
 });
 
 // Route d'enregistrement
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', (req, res) => {
   const { nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password } = req.body;
   
-  try {
-    const result = await pool.query(
-      `INSERT INTO users (nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-      [nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password]
-    );
-    
-    res.status(201).json({ 
-      id: result.rows[0].id,
-      message: 'Compte créé avec succès'
-    });
-  } catch (error) {
-    if (error.code === '23505') { // Code PostgreSQL pour violation de contrainte UNIQUE
-      return res.status(400).json({ error: 'Cet email est déjà utilisé' });
+  console.log('📝 Tentative enregistrement:', email);
+  
+  db.run(
+    `INSERT INTO users (nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [nom, prenom, email, telephone, adresse, npa, ville, pays, dateNaissance, password],
+    function(err) {
+      if (err) {
+        console.error('❌ Erreur register:', err.message);
+        if (err.message.includes('UNIQUE')) {
+          return res.status(400).json({ error: 'Cet email est déjà utilisé' });
+        }
+        return res.status(500).json({ error: err.message });
+      }
+      console.log('✅ Utilisateur créé, ID:', this.lastID);
+      res.status(201).json({ 
+        id: this.lastID,
+        message: 'Compte créé avec succès'
+      });
     }
-    console.error('Erreur register:', error);
-    res.status(500).json({ error: error.message });
-  }
+  );
 });
 
 // Route de connexion
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', (req, res) => {
   const { email, password } = req.body;
   
-  try {
-    const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1 AND password = $2',
-      [email, password]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
+  db.get(
+    'SELECT * FROM users WHERE email = ? AND password = ?',
+    [email, password],
+    (err, user) => {
+      if (err) {
+        console.error('❌ Erreur login:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      if (!user) {
+        return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
+      }
+      res.json({ 
+        id: user.id,
+        nom: user.nom,
+        prenom: user.prenom,
+        email: user.email,
+        telephone: user.telephone,
+        adresse: user.adresse,
+        npa: user.npa,
+        ville: user.ville,
+        pays: user.pays
+      });
     }
-    
-    const user = result.rows[0];
-    res.json({ 
-      id: user.id,
-      nom: user.nom,
-      prenom: user.prenom,
-      email: user.email,
-      telephone: user.telephone,
-      adresse: user.adresse,
-      npa: user.npa,
-      ville: user.ville,
-      pays: user.pays
-    });
-  } catch (error) {
-    console.error('Erreur login:', error);
-    res.status(500).json({ error: error.message });
-  }
+  );
 });
 
 // Route pour récupérer un utilisateur
-app.get('/api/users/:id', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM users WHERE id = $1', [req.params.id]);
-    
-    if (result.rows.length === 0) {
+app.get('/api/users/:id', (req, res) => {
+  db.get('SELECT * FROM users WHERE id = ?', [req.params.id], (err, user) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (!user) {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
-    
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Erreur get user:', error);
-    res.status(500).json({ error: error.message });
-  }
+    res.json(user);
+  });
 });
 
 // Route pour récupérer toutes les commandes
-app.get('/api/orders', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM orders ORDER BY createdAt DESC');
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Erreur get orders:', error);
-    res.status(500).json({ error: error.message });
-  }
+app.get('/api/orders', (req, res) => {
+  db.all('SELECT * FROM orders ORDER BY createdAt DESC', (err, orders) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(orders);
+  });
 });
 
 // Route pour créer une commande
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', (req, res) => {
   const { userId, items, total, pickupDate, pickupTime } = req.body;
   
-  try {
-    const result = await pool.query(
-      `INSERT INTO orders (userId, items, total, pickupDate, pickupTime) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [userId, JSON.stringify(items), total, pickupDate, pickupTime]
-    );
-    
-    res.status(201).json({ id: result.rows[0].id });
-  } catch (error) {
-    console.error('Erreur create order:', error);
-    res.status(500).json({ error: error.message });
-  }
+  db.run(
+    `INSERT INTO orders (userId, items, total, pickupDate, pickupTime) 
+     VALUES (?, ?, ?, ?, ?)`,
+    [userId, JSON.stringify(items), total, pickupDate, pickupTime],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.status(201).json({ id: this.lastID });
+    }
+  );
 });
 
 app.listen(PORT, () => {
   console.log(`✅ Serveur démarré sur le port ${PORT}`);
-  console.log(`📊 Base de données: PostgreSQL`);
+  console.log(`📊 Base de données: SQLite`);
 });
