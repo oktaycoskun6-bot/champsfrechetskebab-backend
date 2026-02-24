@@ -171,3 +171,272 @@ app.listen(PORT, () => {
   console.log(`✅ Serveur démarré sur le port ${PORT}`);
   console.log(`📊 Base de données: SQLite`);
 });
+
+
+// ========================================
+// ROUTES ADMIN
+// ========================================
+
+// Créer les tables pour les produits et catégories
+db.run(`CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  displayOrder INTEGER DEFAULT 0,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, (err) => {
+  if (err) console.error('❌ Erreur table categories:', err);
+  else console.log('✅ Table categories créée');
+});
+
+db.run(`CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  price REAL NOT NULL,
+  category TEXT NOT NULL,
+  description TEXT,
+  image TEXT,
+  available BOOLEAN DEFAULT 1,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, (err) => {
+  if (err) console.error('❌ Erreur table products:', err);
+  else console.log('✅ Table products créée');
+});
+
+// Middleware pour vérifier si l'utilisateur est admin
+const isAdmin = (req, res, next) => {
+  const adminEmail = req.headers['admin-email'];
+  const adminPassword = req.headers['admin-password'];
+  
+  // Email admin par défaut (à changer en production)
+  if (adminEmail === 'admin@champsfrechets.com' && adminPassword === 'Admin123!') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Accès refusé - Admin uniquement' });
+  }
+};
+
+// ========================================
+// GESTION DES CATÉGORIES
+// ========================================
+
+// Récupérer toutes les catégories
+app.get('/api/admin/categories', isAdmin, (req, res) => {
+  db.all('SELECT * FROM categories ORDER BY displayOrder', (err, categories) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(categories);
+  });
+});
+
+// Ajouter une catégorie
+app.post('/api/admin/categories', isAdmin, (req, res) => {
+  const { name, displayOrder } = req.body;
+  
+  db.run(
+    'INSERT INTO categories (name, displayOrder) VALUES (?, ?)',
+    [name, displayOrder || 0],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.status(201).json({ id: this.lastID, name, displayOrder });
+    }
+  );
+});
+
+// Modifier une catégorie
+app.put('/api/admin/categories/:id', isAdmin, (req, res) => {
+  const { name, displayOrder } = req.body;
+  
+  db.run(
+    'UPDATE categories SET name = ?, displayOrder = ? WHERE id = ?',
+    [name, displayOrder, req.params.id],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ message: 'Catégorie mise à jour' });
+    }
+  );
+});
+
+// Supprimer une catégorie
+app.delete('/api/admin/categories/:id', isAdmin, (req, res) => {
+  db.run('DELETE FROM categories WHERE id = ?', [req.params.id], function(err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json({ message: 'Catégorie supprimée' });
+  });
+});
+
+// ========================================
+// GESTION DES PRODUITS
+// ========================================
+
+// Récupérer tous les produits
+app.get('/api/admin/products', isAdmin, (req, res) => {
+  db.all('SELECT * FROM products ORDER BY category, name', (err, products) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(products);
+  });
+});
+
+// Ajouter un produit
+app.post('/api/admin/products', isAdmin, (req, res) => {
+  const { name, price, category, description, image, available } = req.body;
+  
+  db.run(
+    `INSERT INTO products (name, price, category, description, image, available) 
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [name, price, category, description, image, available !== false ? 1 : 0],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.status(201).json({ 
+        id: this.lastID, 
+        name, 
+        price, 
+        category, 
+        description, 
+        image, 
+        available 
+      });
+    }
+  );
+});
+
+// Modifier un produit
+app.put('/api/admin/products/:id', isAdmin, (req, res) => {
+  const { name, price, category, description, image, available } = req.body;
+  
+  db.run(
+    `UPDATE products 
+     SET name = ?, price = ?, category = ?, description = ?, image = ?, available = ?, updatedAt = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [name, price, category, description, image, available ? 1 : 0, req.params.id],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ message: 'Produit mis à jour' });
+    }
+  );
+});
+
+// Supprimer un produit
+app.delete('/api/admin/products/:id', isAdmin, (req, res) => {
+  db.run('DELETE FROM products WHERE id = ?', [req.params.id], function(err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json({ message: 'Produit supprimé' });
+  });
+});
+
+// ========================================
+// RAPPORTS ET STATISTIQUES
+// ========================================
+
+// Rapport des commandes par période
+app.get('/api/admin/reports/orders', isAdmin, (req, res) => {
+  const { startDate, endDate, period } = req.query;
+  
+  let query = `
+    SELECT 
+      DATE(createdAt) as date,
+      COUNT(*) as totalOrders,
+      SUM(total) as totalRevenue,
+      AVG(total) as averageOrder
+    FROM orders
+  `;
+  
+  const params = [];
+  
+  if (startDate && endDate) {
+    query += ' WHERE DATE(createdAt) BETWEEN ? AND ?';
+    params.push(startDate, endDate);
+  }
+  
+  if (period === 'month') {
+    query += ' GROUP BY strftime("%Y-%m", createdAt)';
+  } else if (period === 'year') {
+    query += ' GROUP BY strftime("%Y", createdAt)';
+  } else {
+    query += ' GROUP BY DATE(createdAt)';
+  }
+  
+  query += ' ORDER BY date DESC';
+  
+  db.all(query, params, (err, reports) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(reports);
+  });
+});
+
+// Statistiques globales
+app.get('/api/admin/stats', isAdmin, (req, res) => {
+  const stats = {};
+  
+  // Total commandes
+  db.get('SELECT COUNT(*) as total, SUM(total) as revenue FROM orders', (err, orderStats) => {
+    if (err) return res.status(500).json({ error: err.message });
+    stats.orders = orderStats;
+    
+    // Total utilisateurs
+    db.get('SELECT COUNT(*) as total FROM users', (err, userStats) => {
+      if (err) return res.status(500).json({ error: err.message });
+      stats.users = userStats;
+      
+      // Total produits
+      db.get('SELECT COUNT(*) as total FROM products', (err, productStats) => {
+        if (err) return res.status(500).json({ error: err.message });
+        stats.products = productStats;
+        
+        // Commandes du mois
+        db.get(
+          `SELECT COUNT(*) as total, SUM(total) as revenue 
+           FROM orders 
+           WHERE strftime('%Y-%m', createdAt) = strftime('%Y-%m', 'now')`,
+          (err, monthStats) => {
+            if (err) return res.status(500).json({ error: err.message });
+            stats.thisMonth = monthStats;
+            
+            res.json(stats);
+          }
+        );
+      });
+    });
+  });
+});
+
+// Produits les plus vendus
+app.get('/api/admin/reports/top-products', isAdmin, (req, res) => {
+  const { limit } = req.query;
+  
+  db.all(
+    `SELECT 
+      items,
+      COUNT(*) as orderCount
+     FROM orders
+     GROUP BY items
+     ORDER BY orderCount DESC
+     LIMIT ?`,
+    [limit || 10],
+    (err, topProducts) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json(topProducts);
+    }
+  );
+});
+
+console.log('✅ Routes admin configurées');
